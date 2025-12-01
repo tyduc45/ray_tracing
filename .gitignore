@@ -1,0 +1,62 @@
+# --- 1. 操作系统生成的临时文件 ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- 2. 编译输出目录 ---
+# 我们使用 CMake 生成的 build 文件夹
+build/
+out/
+bin/
+
+# --- 3. CMake 生成的临时文件 ---
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+# 这里的 ! 表示“除了...之外”，我们要保留根目录的 CMakeLists.txt
+!CMakeLists.txt
+
+# --- 4. Visual Studio / MSVC 中间文件 ---
+# 即使你用 VS Code，CMake 也可能生成 .sln 文件
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+*.idb
+*.pdb
+*.ilk
+*.obj
+*.iobj
+*.ipdb
+*.tlog
+
+# --- 5. 可执行文件与二进制 ---
+*.exe
+*.lib
+*.exp
+
+# --- 6. 动态链接库 DLL 策略 ---
+# 默认忽略所有生成的 dll
+*.dll
+# 但是！保留 vendor 文件夹里原本就有的 dll (比如 Assimp 的 dll)
+!vendor/**/*.dll
+# 以及保留 vendor 里原本就有的 lib
+!vendor/**/*.lib
+
+# --- 7. VS Code 配置 ---
+# 通常 .vscode 包含本地路径配置，不建议上传
+.vscode/
+
+# 【可选】如果你想把 launch.json (调试配置) 分享给队友或另一台电脑，
+# 请取消下面这行的注释（删除前面的 #）：
+!.vscode/launch.json
+
+# --- 8. 资源文件 (视情况而定) ---
+# 这里的 assets 文件夹通常应该保留，用来存放测试模型
+# 如果以后模型太大（几百MB），再考虑忽略它
+assets/
+temp/
