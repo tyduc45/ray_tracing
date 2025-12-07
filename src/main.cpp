@@ -1,184 +1,259 @@
+// main.cpp
+// 依赖：GLFW、GLAD、GLM
+// 编译时链接：opengl32.lib glfw3.lib 等（根据你自己工程配置）
+
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <imgui.h>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_opengl3.h>
-#include <math.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 #include <iostream>
-#include <string>
 #include <vector>
+#include <string>
+#include <fstream>
+#include <sstream>
 
-std::string lastDroppedFile = "None";
-
-void drop_callback(GLFWwindow* window, int count, const char** paths)
+// =================== 工具函数：读文件 ===================
+std::string loadTextFile(const std::string &path)
 {
-    for (int i = 0; i < count;i++)
+    std::ifstream file(path);
+    if (!file.is_open())
     {
-        std::string path = paths[i];
-
-        if (path.find(".obj") != std::string::npos || path.find(".OBJ") != std::string::npos)
-        {
-            std::cout << "[System] OBJ File Dropped: " << path << std::endl;
-            lastDroppedFile = path;
-
-            // TODO: call LoadModel(path) here
-        } 
-        else 
-        {
-            std::cout << "[System] Ignored non-obj file: " << path << std::endl;
-        }
+        std::cerr << "Failed to open file: " << path << std::endl;
+        return "";
     }
+    std::stringstream ss;
+    ss << file.rdbuf();
+    return ss.str();
 }
 
-void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+// =================== 工具函数：编译 Shader ===================
+GLuint compileShader(GLenum type, const std::string &src, const std::string &debugName)
 {
-    glViewport(0, 0, width, height);
-}
+    GLuint shader = glCreateShader(type);
+    const char *cstr = src.c_str();
+    glShaderSource(shader, 1, &cstr, nullptr);
+    glCompileShader(shader);
 
-void scroll_font_scale(ImGuiIO &io)
-{
-    if(io.KeyShift && io.MouseWheel != 0.0f){
-        float zoom_speed = 0.1f;
-        io.FontGlobalScale += io.MouseWheel * zoom_speed;
-
-        io.FontGlobalScale = std::min(std::max(io.FontGlobalScale, 0.5f), std::min(io.FontGlobalScale, 4.0f));
+    GLint success = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        GLint logLen = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLen);
+        std::string log(logLen, '\0');
+        glGetShaderInfoLog(shader, logLen, nullptr, log.data());
+        std::cerr << "Shader compile error (" << debugName << "):\n"
+                  << log << std::endl;
     }
+    return shader;
 }
+
+GLuint linkProgram(const std::vector<GLuint> &shaders, const std::string &debugName)
+{
+    GLuint prog = glCreateProgram();
+    for (auto s : shaders)
+        glAttachShader(prog, s);
+
+    glLinkProgram(prog);
+
+    GLint success = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        GLint logLen = 0;
+        glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &logLen);
+        std::string log(logLen, '\0');
+        glGetProgramInfoLog(prog, logLen, nullptr, log.data());
+        std::cerr << "Program link error (" << debugName << "):\n"
+                  << log << std::endl;
+    }
+
+    for (auto s : shaders)
+        glDeleteShader(s);
+
+    return prog;
+}
+
+// =================== 场景中的 Sphere 结构 ===================
+// 注意：和 GLSL 里保持对齐一致（std430），我们用了两个 vec4：
+// centerRadius = (cx, cy, cz, radius)
+// colorEmission = (r, g, b, emission)
+struct SphereCPU
+{
+    glm::vec4 centerRadius;
+    glm::vec4 colorEmission;
+};
 
 int main()
 {
-    // initialization
-    glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,6);
+    // ---------- 初始化 GLFW ----------
+    if (!glfwInit())
+    {
+        std::cerr << "Failed to init GLFW\n";
+        return -1;
+    }
+
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow *window = glfwCreateWindow(1600, 900, "RayTracing Renderer - Day 1", NULL, NULL);
+    int width = 1280;
+    int height = 720;
 
-    if(window == NULL){
-        std::cout << "Failed to create GLFW window" << std::endl;
+    GLFWwindow *window = glfwCreateWindow(width, height, "Compute Shader Ray Tracing (Spheres)", nullptr, nullptr);
+    if (!window)
+    {
+        std::cerr << "Failed to create window\n";
         glfwTerminate();
         return -1;
     }
+
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(1); // vsync
 
-    // callback registration
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetDropCallback(window, drop_callback); 
-
-    // glad initialization
-    if(!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)){
-        std::cout << "Failed to initialize GLAD" << std::endl;
+    // ---------- 初始化 GLAD ----------
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cerr << "Failed to init GLAD\n";
         return -1;
     }
 
-    // imgui initialization
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();(void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // open docking
+    std::cout << "OpenGL version: " << glGetString(GL_VERSION) << std::endl;
 
-    ImGui::StyleColorsDark();
+    // ---------- 创建输出纹理 ----------
+    GLuint rayTex = 0;
+    glGenTextures(1, &rayTex);
+    glBindTexture(GL_TEXTURE_2D, rayTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0,
+                 GL_RGBA, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
-    // imgui backend initialzation
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 460");
+    // ---------- 创建 Sphere 的 SSBO ----------
+    std::vector<SphereCPU> spheres;
+    spheres.push_back({
+        glm::vec4(0.0f, 0.0f, -5.0f, 1.0f), // center (0,0,-5), radius 1
+        glm::vec4(1.0f, 0.2f, 0.2f, 0.0f)   // red, emission 0
+    });
 
-    // main loop
-    while(!glfwWindowShouldClose(window))
+    spheres.push_back({
+        glm::vec4(2.0f, 0.0f, -6.0f, 1.0f),
+        glm::vec4(0.2f, 1.0f, 0.2f, 0.0f) // green
+    });
+
+    spheres.push_back({
+        glm::vec4(-2.0f, 0.0f, -4.0f, 1.0f),
+        glm::vec4(0.2f, 0.2f, 1.0f, 0.0f) // blue
+    });
+
+    // 一个大地面球
+    spheres.push_back({glm::vec4(0.0f, -1001.0f, -5.0f, 1000.0f),
+                       glm::vec4(0.8f, 0.8f, 0.8f, 0.0f)});
+
+    GLuint sphereSSBO = 0;
+    glGenBuffers(1, &sphereSSBO);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sphereSSBO);
+    glBufferData(GL_SHADER_STORAGE_BUFFER,
+                 spheres.size() * sizeof(SphereCPU),
+                 spheres.data(),
+                 GL_STATIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sphereSSBO); // binding = 0
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    int sphereCount = static_cast<int>(spheres.size());
+
+    // ---------- 编译 Compute Shader ----------
+    std::string csSrc = loadTextFile("E://cpp_review//capstone_sdust//ray_tracing//src//raytrace.comp");
+    GLuint cs = compileShader(GL_COMPUTE_SHADER, csSrc, "raytrace.comp");
+    GLuint rayProgram = linkProgram({cs}, "RaytraceProgram");
+
+    // ---------- 编译 显示用的全屏三角形 Shader ----------
+    std::string vsSrc = loadTextFile("E://cpp_review//capstone_sdust//ray_tracing//src//fullscreen.vert");
+    std::string fsSrc = loadTextFile("E://cpp_review//capstone_sdust//ray_tracing//src//fullscreen.frag");
+    GLuint vs = compileShader(GL_VERTEX_SHADER, vsSrc, "fullscreen.vert");
+    GLuint fs = compileShader(GL_FRAGMENT_SHADER, fsSrc, "fullscreen.frag");
+    GLuint quadProgram = linkProgram({vs, fs}, "QuadProgram");
+
+    // 全屏三角形不需要 VBO/VAO，直接用 gl_VertexID
+    GLuint quadVAO = 0;
+    glGenVertexArrays(1, &quadVAO);
+
+    // ---------- 相机参数 ----------
+    glm::vec3 camPos(0.0f, 1.0f, 0.0f);
+    glm::vec3 camTarget(0.0f, 0.5f, -5.0f);
+    glm::vec3 camForward = glm::normalize(camTarget - camPos);
+    glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    glm::vec3 camRight = glm::normalize(glm::cross(camForward, worldUp));
+    glm::vec3 camUp = glm::normalize(glm::cross(camRight, camForward));
+    float fov = 45.0f;
+
+    int frame = 0;
+
+    // =================== 主循环 ===================
+    while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
 
-        // new frame for imgui
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
+        // 如果窗口大小改变，可以重新调整纹理大小（这里简单点略过）
+        // glGetFramebufferSize(window, &width, &height);
 
-        // adjust font size by scroll
-        scroll_font_scale(io);
+        // ---------- Dispatch Compute Shader 做 Ray Tracing ----------
+        glUseProgram(rayProgram);
 
-        // create docker space for full screen, let imgui take iver whole window
-        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), 0, 0);
+        // 屏幕尺寸 & 相机参数
+        glUniform1i(glGetUniformLocation(rayProgram, "uWidth"), width);
+        glUniform1i(glGetUniformLocation(rayProgram, "uHeight"), height);
+        glUniform1i(glGetUniformLocation(rayProgram, "uFrame"), frame++);
+        glUniform1i(glGetUniformLocation(rayProgram, "uSphereCount"), sphereCount);
 
-        // window widget
-        ImGui::Begin("Inspector");
-        {
-            ImGui::Text("Transform Info");
+        glUniform3fv(glGetUniformLocation(rayProgram, "uCamPos"), 1, glm::value_ptr(camPos));
+        glUniform3fv(glGetUniformLocation(rayProgram, "uCamForward"), 1, glm::value_ptr(camForward));
+        glUniform3fv(glGetUniformLocation(rayProgram, "uCamRight"), 1, glm::value_ptr(camRight));
+        glUniform3fv(glGetUniformLocation(rayProgram, "uCamUp"), 1, glm::value_ptr(camUp));
+        glUniform1f(glGetUniformLocation(rayProgram, "uFov"), fov);
 
-            static float pos[3] = {0.0f, 0.0f, 0.0f};
-            ImGui::DragFloat3("Position", pos, 0.1f);
+        // 绑定 Sphere SSBO
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sphereSSBO);
 
-            static float rot[3] = {0.0f, 0.0f, 0.0f};
-            ImGui::DragFloat3("Rotation", rot, 0.1f);
+        // 绑定输出图像
+        glBindImageTexture(0, rayTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
-            static float scale[3] = {0.0f, 0.0f, 0.0f};
-            ImGui::DragFloat3("Scale", scale, 0.1f);
+        // 计算工作组大小
+        const int localSizeX = 8;
+        const int localSizeY = 8;
+        int gx = (width + localSizeX - 1) / localSizeX;
+        int gy = (height + localSizeY - 1) / localSizeY;
 
-            ImGui::Separator();
-            ImGui::Text("ray tracing settings");
+        glDispatchCompute(gx, gy, 1);
 
-            static bool enableRT = false;
-            ImGui::Checkbox("Enable ray Tracing", &enableRT);
-        }
-        ImGui::End();
+        // 确保写完纹理再拿去画
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
-        // asset Browser
-        ImGui::Begin("Asset Browser");
-        {
-            ImGui::Text("Project Assets");
-            ImGui::Separator();
-            ImGui::Text("Last Dropped File:");
-            ImGui::TextColored(ImVec4(0, 1, 0, 1), "%s", lastDroppedFile.c_str());
-
-
-            ImGui::Button("models/");
-            ImGui::Button("textures/");
-        }
-        ImGui::End();
-
-        // Viewport
-        ImGui::PushStyleColor(ImGuiCol_WindowBg,ImVec4(0.0f,0.0f,0.0f,1.0f));
-        ImGui::Begin("Viewport");
-        {
-            ImVec2 viewportSize = ImGui::GetContentRegionAvail();
-
-            // show current viewport resolution
-            ImGui::SetCursorPos(ImVec2(10,10));
-            ImGui::TextColored(ImVec4(1, 1, 0, 1), "Viewport Resolution: %.0f x %.0f", viewportSize.x, viewportSize.y);
-
-            // TODO: 明天我们就在这里用 ImGui::Image() 绘制 FBO 纹理
-        }
-        ImGui::End();
-        ImGui::PopStyleColor();
-
-        // render
-        ImGui::Render();
-
-        // set frame buffer color
-        int display_w, display_h;
-        glfwGetFramebufferSize(window,&display_w,&display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(0.1f, 0.1f, 0.1f, 0.1f);
+        // ---------- 画全屏三角形显示结果 ----------
+        glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // draw ImGui data
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        glUseProgram(quadProgram);
+        glBindVertexArray(quadVAO);
 
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-        {
-            GLFWwindow *backup_current_context = glfwGetCurrentContext();
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
-            glfwMakeContextCurrent(backup_current_context);
-        }
-        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, rayTex);
+        glUniform1i(glGetUniformLocation(quadProgram, "uRayTex"), 0);
+
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
         glfwSwapBuffers(window);
     }
 
-    // clean up
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
+    // ---------- 资源清理 ----------
+    glDeleteProgram(rayProgram);
+    glDeleteProgram(quadProgram);
+    glDeleteTextures(1, &rayTex);
+    glDeleteBuffers(1, &sphereSSBO);
+    glDeleteVertexArrays(1, &quadVAO);
 
     glfwDestroyWindow(window);
     glfwTerminate();

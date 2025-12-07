@@ -37,7 +37,9 @@ target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(imgui glfw3.lib opengl32.lib) 
 
 # --- 可执行文件 ---
-add_executable(App src/main.cpp)
+add_executable(App 
+        src/main.cpp
+)
 
 # --- 链接所有库 ---
 target_link_libraries(App 
