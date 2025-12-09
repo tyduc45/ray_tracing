@@ -1,0 +1,4 @@
+cmake -S . -B ./build
+cmake --build ./build --config Debug
+cmake --build ./build --config Release
+E:\cpp_review\capstone_sdust\ray_tracing\build\Release\App.exe > image.ppm
