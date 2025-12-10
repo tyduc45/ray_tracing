@@ -1,6 +1,7 @@
 #ifndef HITTABLE_LIST_H
 #define HITTABLE_LIST_H
 
+#include "raytracer.h"
 #include <vector>
 
 class hittable_list : public hittable{

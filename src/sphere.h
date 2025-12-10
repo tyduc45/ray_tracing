@@ -1,11 +1,13 @@
 #ifndef SPHERE_H
 #define SPHERE_H
 
+#include "raytracer.h"
 #include "hittable.h"
+#include "material.h"
 
 class sphere: public hittable {
 public:
-    sphere(const point3D& center,double radius): center(center), radius(std::fmax(0,radius)) {}
+    sphere(const point3D& center,double radius,shared_ptr<material> mat): center(center), radius(std::fmax(0,radius)),mat(mat) {}
 
     bool hit(const ray &r, interval ray_t, hit_record &rec) const override{
         vec3 oc = center - r.origin();
@@ -32,11 +34,13 @@ public:
         rec.p = r.at(rec.t);
         vec3 outward_normal = (rec.p - center) / radius; // normalized
         rec.set_face_normal(r, outward_normal);
+        rec.mat = mat;
 
         return true;
     }
 private: 
     point3D center;
     double radius;
+    shared_ptr<material> mat;
 };
 #endif

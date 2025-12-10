@@ -1,13 +1,15 @@
 #ifndef HITTABLE_H
 #define HITTABLE_H
 
-#include "vec3.h"
+#include "raytracer.h"
 
+class material;
 class hit_record{
     public:
         point3D p;
         vec3 normal;
         double t;
+        shared_ptr<material> mat;
         bool front_face;
 
         void set_face_normal(const ray& r, const vec3& outward_normal)
