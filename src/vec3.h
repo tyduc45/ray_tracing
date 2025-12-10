@@ -124,6 +124,14 @@ inline vec3 random_on_hemisphere(const vec3& normal)
     
 }
 
+// refraction (glass water, dielected)
+inline vec3 refract(const vec3& in, const vec3& normal, double etai_over_etat){
+    auto _in_dot_normal = std::fmin(dot(-in, normal), 1.0);
+    vec3 r_out_prep = etai_over_etat * (in + _in_dot_normal * normal);
+    vec3 r_out_para = -std::sqrt(1 - r_out_prep.length_squared()) * normal;
+    return r_out_prep + r_out_para;
+}
+
 inline vec3 unit_vector(const vec3 &v)
 {
     return v / v.length();
